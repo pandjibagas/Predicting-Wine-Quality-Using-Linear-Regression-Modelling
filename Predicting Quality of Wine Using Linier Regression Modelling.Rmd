@@ -1,0 +1,273 @@
+---
+title: "Predicting Wine Quality Using Linier Regression Modelling"
+author: "Pandji Bagaskara"
+date: "`r format(Sys.Date(), '%B %e, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    theme: flatly
+    toc: yes
+    toc_float:
+      collapsed: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  comment = "#>"
+)
+
+library(tidyverse)
+library(GGally)
+library(MLmetrics)
+library(car)
+library(caret)
+library(lmtest)
+library(inspectdf)
+library(performance)
+library(e1071)
+library(readxl)
+library(plyr)
+library(dplyr)
+options(scipen = 999)
+```
+# **Business Question**
+
+In this case, we want to see the relationship between wine substantial and quality based on the assessment of wine experts. Moreover, predicting quality of wine so we can deliminate assestement of wine from expert.
+
+# **Preparing the Data**
+
+*Read data*
+```{r}
+wine <- read.csv("winequality-red.csv")
+head(wine,10)
+```
+
+*Suspect Data*
+```{r}
+glimpse(wine)
+nrow(wine)
+```
+# **Data Wrangling**
+
+## *Check NA*
+```{r}
+colSums(is.na(wine))
+
+```
+## *Find outlier*
+```{r}
+summary(wine)
+```
+### *Boxplot Before*
+```{r}
+boxplot(wine)
+```
+### *Outlier Iteration*
+```{r}
+#Create outlier function
+outl <- function(x, na.rm = FALSE){
+  qq <- quantile(x, probs = c(0.25, 0.75), na.rm = na.rm)
+  iqr <- diff(qq)
+  x > qq[1] - 1.5*iqr & x < qq[2] + 1.5*iqr
+}
+
+#Iteration Outliers 1
+which_out1 <- colwise(outl)(wine)
+wine_clean1 <- subset(wine, rowSums(which_out1) == ncol(which_out1))
+
+#Iteration Outliers 2
+which_out2 <- colwise(outl)(wine_clean1)
+wine_clean2 <- subset(wine_clean1, rowSums(which_out2) == ncol(which_out2))
+
+#Iteration Outliers 3
+which_out3 <- colwise(outl)(wine_clean2)
+wine_clean3 <- subset(wine_clean2, rowSums(which_out3) == ncol(which_out3))
+
+#Iteration Outliers 4
+which_out4 <- colwise(outl)(wine_clean3)
+wine_clean4 <- subset(wine_clean3, rowSums(which_out4) == ncol(which_out4))
+
+#Iteration Outliers 5
+which_out5 <- colwise(outl)(wine_clean4)
+wine_clean5 <- subset(wine_clean4, rowSums(which_out5) == ncol(which_out5))
+
+nrow(wine_clean5)
+
+
+
+
+```
+
+### *Boxplot after*
+```{r}
+boxplot(wine_clean5)
+```
+# **Data Processing**
+
+## *Check Correlation*
+```{r fig.width=12}
+ggcorr(data = wine_clean5, label = TRUE)
+```
+
+*Linierity*
+```{r}
+cor.test(wine_clean5$quality,wine_clean5$alcohol)$p.value #linier
+cor.test(wine_clean5$quality,wine_clean5$sulphates)$p.value #linier
+cor.test(wine_clean5$quality,wine_clean5$pH)$p.value #linier
+cor.test(wine_clean5$quality,wine_clean5$density)$p.value #linier
+cor.test(wine_clean5$quality,wine_clean5$total.sulfur.dioxide)$p.value #linier
+cor.test(wine_clean5$quality,wine_clean5$free.sulfur.dioxide)$p.value #non linier
+cor.test(wine_clean5$quality,wine_clean5$chlorides)$p.value #linier
+cor.test(wine_clean5$quality,wine_clean5$residual.sugar)$p.value #no linier
+cor.test(wine_clean5$quality,wine_clean5$citric.acid)$p.value #linier
+cor.test(wine_clean5$quality,wine_clean5$volatile.acidity)$p.value #linier
+cor.test(wine_clean5$quality,wine_clean5$fixed.acidity)$p.value #linier
+```
+linierity 
+1. alcohol
+2. sulphates
+3. pH
+4. density
+5. total.sulfur.dioxide
+6. chlorides
+7. citric.acid
+8. volatile.acidity
+9. fixed.acidity
+
+inlinierity
+1. free.sulfur.dioxide
+2. residual.sugar
+
+*Take out variable non linier*
+```{r}
+wine_clean6 <- wine_clean5 %>%
+  select(-c(free.sulfur.dioxide, residual.sugar))
+```
+
+*Correlation*
+```{r}
+ggcorr(wine_clean6, geom = "blank", label = T, label_size = 3, hjust = 1, size = 3, layout.exp = 2) +
+  geom_point(size = 8, aes(color = coefficient > 0, alpha = abs(coefficient) >= 0.5)) +
+  scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) +
+  guides(color = "none", alpha = "none")
+```
+
+# **Linier Regression Modelling**
+
+## *Splitting Model*
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(123)
+
+# train-test splitting
+index <- sample(nrow(wine_clean6), nrow(wine_clean6)*0.75)
+
+# sms_dtm = DocumentTermMatrix yang tidak ada labelnya
+wine_train <- wine_clean6[index,] 
+wine_test <- wine_clean6[-index,]
+```
+
+## *Step Wise Regression*
+```{r}
+# model tanpa prediktor
+model_wine_none <- lm(quality ~ 1, data = wine_train)
+
+# model dengan semua prediktor
+model_wine_all <- lm(quality ~ ., data = wine_train)
+```
+
+## *Backward Method*
+```{r}
+model_back <- step(object = model_wine_all, direction = "backward", trace = F)
+summary(model_back)
+```
+
+## *Forward Method*
+```{r}
+model_forward <- step(object = model_wine_none,
+     scope = list(lower = model_wine_none,
+                  upper = model_wine_all),
+     direction = "forward", 
+     trace = T)
+summary(model_forward)
+```
+
+## *Both Method*
+```{r}
+model_both <- step(object = model_wine_none,
+     scope = list(lower = model_wine_none,
+                  upper = model_wine_all),
+     direction = "both", 
+     trace = T)
+summary(model_both)
+```
+
+## *Comparison of Model Performance*
+```{r}
+compare_performance(model_back, model_forward, model_both)
+```
+
+# **Prediction Quality of Wine**
+```{r}
+wine_predict <- predict(model_both, newdata = wine_test, level = 0.95)
+```
+
+## *Predict VS Actual*
+```{r}
+wine_test$predict <- wine_predict
+
+wine_test %>%
+  mutate(quality_flag = ifelse(quality > 6, "good", "bad"),
+         predict_flag = ifelse(predict > 6, "good", "bad")) %>%
+  select(quality_flag, predict_flag) %>%
+  table()
+
+```
+### *Normality Test*
+
+```{r}
+hist(model_both$residuals)
+```
+
+```{r}
+plot(density(model_both$residuals))
+```
+
+```{r}
+shapiro.test(model_both$residuals)
+```
+Result : normal distribution
+
+### *Homoscedasticity*
+```{r}
+plot(model_both$fitted.values, model_both$residuals)
+abline(h = 0, col = "red")
+```
+
+```{r}
+bptest(model_both)
+```
+Result : residual hetero
+
+### *Multicolinerity*
+```{r}
+vif(model_both)
+```
+Result : no multicolinierity
+
+
+
+# **Conclusion**
+
+Based on the model, the adjusted R-squared is still below the standard < 0.4, which is 0.393. The comparison performance stage in each model also produces the same output due to data cleaning which has removed all outliers in each variable (predictor & target) with the final result there are 923 rows which previously had 1599 rows.
+
+The target variable in this case is quality because the output is predicting the quality of wine from the predictor variable. From the exploratory data, there are 9 linear variables from 11 variables with the highest correlation found in the alcohol variable of 0.5. The interpretation of the model is that 40% of the results of the quality of wine can be generated from the relationship with the selected variable, the rest is described by other variables.
+
+According to the prediction model from the 25% test data, we classify the predicted & actual results with a threshold if quality > 6 is "good" wine and vice versa "bad". This is done because the results of the prediction are numerical continue while the actual is not. The result is that from a total of 231 test data, there are 34 false positive data and 2 false negative data, the rest is in accordance with the actual, if it is a percentage there are 15% of the predictive data that are not appropriate. So it is concluded that the prediction model from the train data has 15% error which by default is only 5% of the data.
+
+
+
